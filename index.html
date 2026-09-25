@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Rollcall — Class Attendance Management System</title>
+  <meta name="description" content="A database-driven class attendance management system: users, students, instructors, courses, enrollment, attendance recording and reports.">
+  <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+  <div id="app" aria-live="polite">
+    <div class="boot">
+      <div class="boot-mark">
+        <svg viewBox="0 0 32 32" width="40" height="40" fill="none" aria-hidden="true"><rect x="3" y="3" width="26" height="26" rx="7" stroke="currentColor" stroke-width="2"/><path d="M9 16.5l4.5 4.5L23 11.5" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+      <p>Loading database…</p>
+    </div>
+  </div>
+  <div id="modal-root"></div>
+  <div id="toast-root" role="status"></div>
+
+  <script src="vendor/sql-wasm.js"></script>
+  <script src="js/schema.js"></script>
+  <script src="js/seed.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
