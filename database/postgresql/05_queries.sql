@@ -86,3 +86,62 @@ SELECT * FROM attendance_audit ORDER BY changed_at DESC;
 -- Generate the rest of the term's sessions from the schedule
 CALL sp_generate_sessions(1, DATE '2026-09-14', DATE '2026-09-30');
 SELECT section_id, session_date, start_time FROM class_sessions WHERE section_id = 1 ORDER BY session_date;
+
+-- ---------------------------------------------------------------------------
+-- Attendance register: one row per student, one cell per session (section 1)
+-- ---------------------------------------------------------------------------
+SELECT s.student_no,
+       s.first_name || ' ' || s.last_name AS student_name,
+       string_agg(COALESCE(LEFT(ar.status::text, 1), '·'), ' ' ORDER BY cs.session_date, cs.start_time) AS register,
+       COUNT(*) FILTER (WHERE ar.status = 'Present') AS present,
+       COUNT(*) FILTER (WHERE ar.status = 'Late')    AS late,
+       COUNT(*) FILTER (WHERE ar.status = 'Absent')  AS absent,
+       COUNT(*) FILTER (WHERE ar.status = 'Excused') AS excused
+FROM enrollments e
+JOIN students s        ON s.student_id  = e.student_id
+JOIN class_sessions cs ON cs.section_id = e.section_id
+LEFT JOIN attendance_records ar
+       ON ar.session_id = cs.session_id AND ar.student_id = s.student_id
+WHERE e.section_id = 1 AND e.status = 'Active' AND cs.session_date <= CURRENT_DATE
+GROUP BY s.student_id
+ORDER BY s.last_name, s.first_name;
+
+-- ---------------------------------------------------------------------------
+-- Absences left: how many more classes each student can miss this term
+-- and still finish at or above the threshold (assumes all other classes attended)
+-- ---------------------------------------------------------------------------
+WITH remaining AS (
+  SELECT sec.section_id, COUNT(*) AS remaining_meetings
+  FROM class_sections sec
+  JOIN academic_terms t     ON t.term_id = sec.term_id AND t.is_current
+  JOIN section_schedules ss ON ss.section_id = sec.section_id
+  JOIN generate_series(CURRENT_DATE + 1, t.end_date, INTERVAL '1 day') AS d(day)
+       ON EXTRACT(ISODOW FROM d.day) = ss.day_of_week
+  GROUP BY sec.section_id
+), thr AS (
+  SELECT setting_value::numeric / 100 AS t FROM system_settings WHERE setting_key = 'attendance_threshold'
+)
+SELECT v.student_name, v.course_code || '-' || v.section_code AS section, v.attendance_pct,
+       r.remaining_meetings,
+       FLOOR((v.present_count + v.late_count) + r.remaining_meetings
+             - thr.t * ((v.sessions_recorded - v.excused_count) + r.remaining_meetings)) AS absences_left
+FROM v_student_section_attendance v
+JOIN remaining r ON r.section_id = v.section_id
+CROSS JOIN thr
+ORDER BY absences_left, v.student_name;
+
+-- ---------------------------------------------------------------------------
+-- Audit trail with context (who changed which student's attendance, and when)
+-- ---------------------------------------------------------------------------
+SELECT a.changed_at, u.username AS changed_by,
+       s.first_name || ' ' || s.last_name AS student_name,
+       c.course_code || '-' || sec.section_code AS section, cs.session_date,
+       a.old_status, a.new_status
+FROM attendance_audit a
+JOIN attendance_records ar ON ar.attendance_id = a.attendance_id
+JOIN students s            ON s.student_id     = ar.student_id
+JOIN class_sessions cs     ON cs.session_id    = ar.session_id
+JOIN class_sections sec    ON sec.section_id   = cs.section_id
+JOIN courses c             ON c.course_id      = sec.course_id
+LEFT JOIN users u          ON u.user_id        = a.changed_by
+ORDER BY a.changed_at DESC;

@@ -28,7 +28,12 @@ Data is saved in your browser's localStorage. **Settings → Reset sample data**
   - Mark each student Present, Absent, Late or Excused, with a check-in time and remarks.
   - Only the authorized instructor (or an admin) can record or edit a session, and future sessions can't be recorded.
   - A student can have only one record per session.
-  - Every change is written to an audit log by a trigger.
+  - Fast marking: filter the roster, mark with the keyboard (<kbd>P</kbd> <kbd>L</kbd> <kbd>A</kbd> <kbd>E</kbd>, arrow keys to move), or fill every unmarked student as Present or Absent in one click.
+  - A warning appears if you try to leave a session with unsaved changes.
+  - Every status change is written to an audit log by a trigger. Admins can browse it on the **Audit log** page, filtered by section, user or new status.
+- **Student view:**
+  - A term calendar heatmap shows each day's attendance at a glance.
+  - An **Absences left** column shows how many more classes a student can miss and still finish at or above the threshold.
 - **Reports** (each with its SQL shown and CSV export):
   - individual history
   - class summary
@@ -37,6 +42,8 @@ Data is saved in your browser's localStorage. **Settings → Reset sample data**
   - attendance percentage
   - absence and lateness
   - students below a threshold (the threshold is configurable)
+  - attendance register: a students × sessions grid with P / L / A / E marks
+  - every report has a print-friendly layout (Print button)
 - **Database tools (admin):**
   - live schema browser with PK/FK, views, triggers and indexes
   - SQL console with sample queries and constraint tests

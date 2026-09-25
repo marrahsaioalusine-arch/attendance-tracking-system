@@ -316,3 +316,71 @@ details.sql summary { cursor: pointer; font-size: var(--text-xs); color: var(--t
   .cols { gap: 3px; }
   .cols .col .x { font-size: 0.55rem; }
 }
+
+/* ---------- v1.1 additions ---------- */
+.kpi.link { cursor: pointer; transition: border-color .15s, background .15s; }
+.kpi.link:hover, .kpi.link:focus-visible { border-color: var(--border-strong); background: var(--surface-2); outline: none; }
+.kpi .arrow { margin-left: auto; color: var(--text-faint); }
+.kpi.link:hover .arrow { color: var(--accent); }
+
+.roster-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; padding: 10px 18px; border-bottom: 1px solid var(--border); }
+.roster-tools .search { flex: 1; min-width: 200px; }
+.roster-tools .search .input { width: 100%; min-width: 0; }
+.kbd-hint { font-size: var(--text-xs); }
+kbd { font-family: var(--font-mono, ui-monospace, monospace); font-size: 11px; padding: 1px 5px; border: 1px solid var(--border-strong); border-bottom-width: 2px; border-radius: 4px; color: var(--text-muted); background: var(--surface-2); }
+.roster-row[tabindex="0"]:focus { outline: none; background: var(--surface-2); box-shadow: inset 3px 0 0 var(--accent); }
+
+/* Term calendar heatmap */
+.cal-wrap { overflow-x: auto; }
+.cal { display: flex; gap: 4px; min-width: max-content; }
+.cal-days, .cal-week { display: grid; grid-template-rows: 14px repeat(var(--days), 18px); gap: 4px; }
+.cal-days span { font-size: 10px; color: var(--text-faint); line-height: 18px; padding-right: 6px; }
+.cal-m { font-size: 10px; color: var(--text-faint); line-height: 14px; white-space: nowrap; width: 18px; overflow: visible; }
+.cal-row .card-head { flex-wrap: wrap; gap: 10px; }
+.cal-cell { display: block; width: 18px; height: 18px; border-radius: 4px; background: var(--surface-2); border: 1px solid transparent; }
+.cal-cell.out { background: transparent; }
+.cal-cell.Present { background: var(--present); }
+.cal-cell.Late { background: var(--late); }
+.cal-cell.Absent { background: var(--absent); }
+.cal-cell.Excused { background: var(--excused); }
+.cal-cell.pending { background: transparent; border: 1px solid var(--text-faint); }
+.cal-cell.future { background: transparent; border: 1px dashed var(--border-strong); }
+.cal-cell.today { box-shadow: 0 0 0 2px var(--bg), 0 0 0 3px var(--text); }
+.cal-cell.sw { width: 11px; height: 11px; border-radius: 3px; }
+
+/* Attendance register */
+.register-wrap { overflow: auto; max-height: 70vh; }
+table.register { border-collapse: separate; border-spacing: 0; }
+table.register th, table.register td { white-space: nowrap; }
+table.register .stick { position: sticky; left: 0; background: var(--surface); z-index: 1; min-width: 180px; border-right: 1px solid var(--border); }
+table.register thead th { position: sticky; top: 0; background: var(--surface); z-index: 2; }
+table.register thead th.stick { z-index: 3; }
+table.register .rc { text-align: center; padding-left: 4px; padding-right: 4px; }
+table.register th.rc a { display: flex; flex-direction: column; align-items: center; line-height: 1.15; font-size: 11px; color: var(--text-muted); text-decoration: none; }
+table.register th.rc a:hover { color: var(--accent); }
+table.register tfoot td { font-size: 11px; border-top: 1px solid var(--border); }
+.rl { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 5px; font-size: 11px; font-weight: 700; color: #0b0d10; }
+.rl.Present { background: var(--present); }
+.rl.Late { background: var(--late); }
+.rl.Absent { background: var(--absent); }
+.rl.Excused { background: var(--excused); }
+.rl.none { background: transparent; color: var(--text-faint); border: 1px dashed var(--border-strong); }
+
+/* Print: clean light report output */
+@media print {
+  :root { --bg: #fff; --surface: #fff; --surface-2: #f3f4f6; --surface-3: #e5e7eb; --border: #d1d5db; --border-strong: #9ca3af; --text: #111827; --text-muted: #374151; --text-faint: #6b7280; }
+  body { background: #fff !important; color: #111827; }
+  .sidebar, .topbar, .toolbar .btn, .toolbar input:not([type=date]), .actions, details.sql, .tabs button:not(.on), #toast-root, .kbd-hint, .roster-tools { display: none !important; }
+  .shell, .main, .content { display: block !important; margin: 0 !important; padding: 0 !important; width: auto !important; }
+  .toolbar select, .toolbar input[type=date] { appearance: none; -webkit-appearance: none; border: 0 !important; background: none !important; padding: 0 !important; height: auto !important; font-weight: 650; color: #111827 !important; min-width: 0 !important; }
+  .card { box-shadow: none !important; break-inside: avoid; border-color: #d1d5db !important; }
+  .register-wrap, .table-wrap { max-height: none !important; overflow: visible !important; }
+  table.register .stick, table.register thead th { position: static; }
+  .rl, .badge, .cal-cell { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  a { color: inherit !important; text-decoration: none !important; }
+}
+.nowrap { white-space: nowrap; }
+.cal-row > * { min-width: 0; }
+.kv dd { overflow-wrap: anywhere; min-width: 0; }
+
+.legend span.rl { display: inline-grid; }

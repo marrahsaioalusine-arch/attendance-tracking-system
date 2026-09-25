@@ -225,5 +225,17 @@
     // Current term: sessions through Oct 9, recorded through Sep 25 (leave Fri Sep 25 CS350 open for a live demo)
     [1, 2, 3, 4, 5].forEach(s => genSessions(s, '2026-09-01', '2026-10-09', '2026-09-25'));
     genSessions(6, '2026-09-01', '2026-10-09', '2026-09-25', d => d === '2026-09-25');
+    // A few after-the-fact corrections so the audit trail (trigger trg_attendance_audit) has history
+    const fix = db.exec(`SELECT ar.attendance_id, cs.session_date, ar.status FROM attendance_records ar
+      JOIN class_sessions cs ON cs.session_id = ar.session_id JOIN class_sections sec ON sec.section_id = cs.section_id
+      WHERE sec.term_id = (SELECT term_id FROM academic_terms WHERE is_current = 1) AND ar.status = 'Absent' ORDER BY ar.attendance_id`)[0];
+    if (fix) fix.values.filter((_, i) => i % 9 === 0).slice(0, 10).forEach(([aid, date], i) => {
+      const toExcused = i % 2 === 0;
+      run(`UPDATE attendance_records SET status = ?, remarks = ?, check_in_time = ? WHERE attendance_id = ?`,
+        [toExcused ? 'Excused' : 'Late', toExcused ? 'Medical certificate submitted later' : 'Arrived late — corrected by instructor', toExcused ? null : '09:20', aid]);
+      const next = new Date(date + 'T00:00:00Z'); next.setUTCDate(next.getUTCDate() + 1 + (i % 2));
+      const when = ymd(next) > '2026-09-25' ? '2026-09-25' : ymd(next);
+      run(`UPDATE attendance_audit SET changed_at = ? WHERE audit_id = (SELECT MAX(audit_id) FROM attendance_audit)`, [`${when} ${String(9 + (i % 7)).padStart(2, '0')}:${String(10 + i * 4).padStart(2, '0')}:00`]);
+    });
   };
 })();

@@ -202,7 +202,7 @@
     ME = loadMe(u.user_id);
     store.set(SESSION_KEY, String(u.user_id), true);
   }
-  function logout() { ME = null; store.del(SESSION_KEY, true); location.hash = '#/login'; render(); }
+  function logout() { DIRTY = false; ME = null; store.del(SESSION_KEY, true); location.hash = '#/login'; render(); }
   const isAdmin = () => ME && ME.role === 'Administrator';
   const isInstructor = () => ME && ME.role === 'Instructor';
   const isStudent = () => ME && ME.role === 'Student';
@@ -263,7 +263,7 @@
     Administrator: [
       ['Overview', [['dashboard', 'Dashboard', ICON.home]]],
       ['Manage', [['users', 'Users & access', ICON.users], ['students', 'Students', ICON.student], ['instructors', 'Instructors', ICON.teacher], ['courses', 'Courses', ICON.book], ['sections', 'Class sections', ICON.layers], ['terms', 'Terms & rooms', ICON.cal], ['enrollments', 'Enrollment', ICON.link]]],
-      ['Attendance', [['attendance', 'Sessions & attendance', ICON.check], ['reports', 'Reports', ICON.chart]]],
+      ['Attendance', [['attendance', 'Sessions & attendance', ICON.check], ['reports', 'Reports', ICON.chart], ['audit', 'Audit log', ICON.history]]],
       ['Database', [['schema', 'Schema', ICON.db], ['sql', 'SQL console', ICON.code], ['settings', 'Settings', ICON.gear]]],
     ],
     Instructor: [
@@ -275,11 +275,11 @@
     ],
   };
   const ROUTES = {
-    Administrator: ['dashboard', 'users', 'students', 'student', 'instructors', 'courses', 'sections', 'terms', 'enrollments', 'attendance', 'session', 'reports', 'schema', 'sql', 'settings'],
+    Administrator: ['dashboard', 'users', 'students', 'student', 'instructors', 'courses', 'sections', 'terms', 'enrollments', 'attendance', 'session', 'reports', 'audit', 'schema', 'sql', 'settings'],
     Instructor: ['dashboard', 'sections', 'enrollments', 'attendance', 'session', 'reports', 'student'],
     Student: ['dashboard', 'history'],
   };
-  const TITLES = { dashboard: 'Dashboard', users: 'Users & access', students: 'Students', student: 'Student profile', instructors: 'Instructors', courses: 'Courses', sections: 'Class sections', terms: 'Terms & rooms', enrollments: 'Enrollment', attendance: 'Sessions & attendance', session: 'Attendance session', reports: 'Reports', schema: 'Database schema', sql: 'SQL console', settings: 'Settings', history: 'Attendance history' };
+  const TITLES = { dashboard: 'Dashboard', users: 'Users & access', students: 'Students', student: 'Student profile', instructors: 'Instructors', courses: 'Courses', sections: 'Class sections', terms: 'Terms & rooms', enrollments: 'Enrollment', attendance: 'Sessions & attendance', session: 'Attendance session', reports: 'Reports', schema: 'Database schema', sql: 'SQL console', settings: 'Settings', history: 'Attendance history', audit: 'Audit log' };
 
   function parseHash() {
     const h = location.hash.replace(/^#\/?/, '');
@@ -311,7 +311,9 @@
           <div class="crumbs"><span class="term">${esc(term ? term.term_name : 'No term')} · ${esc(fmtDate(TODAY, { weekday: 'short', day: 'numeric', month: 'short' }))}</span></div></header>
         <main class="content" id="content">${html}</main>
       </div></div>`;
+    DIRTY = false;
     if (AFTER[route]) AFTER[route](id);
+    lastHash = location.hash;
     window.scrollTo(0, 0);
   }
 
@@ -324,7 +326,14 @@
     const fn = ACTIONS[el.dataset.action];
     if (fn) { e.preventDefault(); try { fn(el, e); } catch (err) { toast(friendly(err), 'err'); } }
   });
-  window.addEventListener('hashchange', render);
+  // Unsaved attendance guard
+  let DIRTY = false, lastHash = location.hash;
+  const LEAVE_MSG = 'You have unsaved attendance changes. Leave this session without saving?';
+  window.addEventListener('hashchange', () => {
+    if (DIRTY && !window.confirm(LEAVE_MSG)) { history.replaceState(null, '', lastHash); return; }
+    DIRTY = false; render();
+  });
+  window.addEventListener('beforeunload', (e) => { if (DIRTY) { e.preventDefault(); e.returnValue = ''; } });
 
   // =====================================================================
   // Login
@@ -467,22 +476,22 @@
         ['Instructors', val(`SELECT COUNT(*) FROM instructors`), `${val(`SELECT COUNT(DISTINCT instructor_id) FROM class_sections WHERE term_id=${tid}`)} teaching this term`],
         ['Class sections', sections.length, `${val(`SELECT COUNT(*) FROM courses`)} courses in catalogue`],
         ['Term attendance', t.pct != null ? t.pct + '%' : '—', `${num(t.total)} records · threshold ${threshold()}%`],
-        ['Below threshold', low.length === 8 ? val(`SELECT COUNT(*) FROM v_low_attendance v JOIN class_sections sec ON sec.section_id=v.section_id WHERE sec.term_id=${tid}`) : low.length, 'student–section pairs'],
-        ['Pending sessions', pending, 'held but not yet recorded'],
+        ['Below threshold', low.length === 8 ? val(`SELECT COUNT(*) FROM v_low_attendance v JOIN class_sections sec ON sec.section_id=v.section_id WHERE sec.term_id=${tid}`) : low.length, 'student–section pairs', 'threshold'],
+        ['Pending sessions', pending, 'held but not yet recorded', 'pending'],
       ];
     } else {
       kpis = [
         ['My sections', sections.length, term ? term.term_name : ''],
         ['Students taught', val(`SELECT COUNT(DISTINCT e.student_id) FROM enrollments e JOIN class_sections sec ON sec.section_id=e.section_id WHERE sec.term_id=${tid} AND e.status='Active' ${scope}`), 'active enrollments'],
         ['Attendance rate', t.pct != null ? t.pct + '%' : '—', `${num(t.total)} records`],
-        ['Below threshold', val(`SELECT COUNT(*) FROM v_low_attendance v JOIN class_sections sec ON sec.section_id=v.section_id WHERE sec.term_id=${tid} ${scope}`), `under ${threshold()}%`],
-        ['Pending sessions', pending, 'need attendance'],
+        ['Below threshold', val(`SELECT COUNT(*) FROM v_low_attendance v JOIN class_sections sec ON sec.section_id=v.section_id WHERE sec.term_id=${tid} ${scope}`), `under ${threshold()}%`, 'threshold'],
+        ['Pending sessions', pending, 'need attendance', 'pending'],
       ];
     }
     return `
       <div class="page-head"><div><h1>${isAdmin() ? 'Institution overview' : 'Welcome back, ' + esc(ME.name.split(' ')[0])}</h1><p>${esc(term ? `${term.term_name} · ${fmtDate(term.start_date)} – ${fmtDate(term.end_date)}` : '')}</p></div>
         <div class="actions"><a class="btn" href="#/reports">${ICON.chart}Reports</a><a class="btn primary" href="#/attendance">${ICON.check}${isAdmin() ? 'Sessions' : 'Take attendance'}</a></div></div>
-      <div class="grid kpis">${kpis.map(([l, v, d]) => `<div class="card kpi"><div class="label">${esc(l)}</div><div class="value">${esc(v)}</div><div class="delta">${esc(d)}</div></div>`).join('')}</div>
+      <div class="grid kpis">${kpis.map(([l, v, d, go]) => `<div class="card kpi${go ? ' link' : ''}" ${go ? `data-action="kpi-go" data-v="${go}" role="link" tabindex="0"` : ''}><div class="label">${esc(l)}${go ? '<span class="arrow">→</span>' : ''}</div><div class="value">${esc(v)}</div><div class="delta">${esc(d)}</div></div>`).join('')}</div>
       <div class="grid two">
         <div class="card"><div class="card-head"><div><h2>Attendance trend</h2><p>Last ${trend.length} class days · stacked by status</p></div></div><div class="card-body">${trendChart(trend)}</div></div>
         <div class="card"><div class="card-head"><div><h2>Status breakdown</h2><p>All records this term</p></div></div><div class="card-body">${stackBar(t)}
@@ -509,8 +518,75 @@
         ${today.length ? `<div class="session-list">${today.map(sessionItem).join('')}</div>` : '<div class="empty">No classes scheduled today.</div>'}</div>`;
   };
   ACTIONS['goto-report'] = (el) => { state.reportTab = el.dataset.tab; go('reports'); };
+  ACTIONS['kpi-go'] = (el) => {
+    if (el.dataset.v === 'pending') { state.attWhen = 'pending'; go('attendance'); }
+    else { state.reportTab = el.dataset.v; go('reports'); }
+  };
 
   // ---------------------------------------------------------------- Student overview (student role + profile)
+
+  // Remaining scheduled meetings for a section between tomorrow and the end of its term
+  function remainingMeetings(sectionId, termEnd) {
+    const sch = q(`SELECT day_of_week FROM section_schedules WHERE section_id = ?`, [sectionId]).map((r) => r.day_of_week);
+    if (!sch.length || !termEnd) return 0;
+    let n = 0; const d = new Date(TODAY + 'T00:00:00'); d.setDate(d.getDate() + 1);
+    for (; localYmd(d) <= termEnd; d.setDate(d.getDate() + 1)) if (sch.includes(((d.getDay() + 6) % 7) + 1)) n++;
+    return n;
+  }
+  // How many more absences a student can have and still finish at or above the threshold,
+  // assuming they attend every other remaining class. Negative = cannot reach the threshold.
+  function absenceAllowance(r, termEnd) {
+    const rem = remainingMeetings(r.section_id, termEnd);
+    const attended = num(r.present_count) + num(r.late_count);
+    const counted = num(r.sessions_recorded) - num(r.excused_count);
+    const t = threshold() / 100;
+    return { rem, allowed: Math.floor(attended + rem - t * (counted + rem) + 1e-9) };
+  }
+  function allowanceCell(a) {
+    if (a == null) return '<span class="faint">—</span>';
+    if (a.allowed < 0) return `<span class="badge Absent" title="Even with full attendance for the ${a.rem} remaining classes, this class ends below ${threshold()}%">Can't reach ${threshold()}%</span>`;
+    const cls = a.allowed === 0 ? 'Absent' : a.allowed <= 2 ? 'Late' : 'Present';
+    return `<span class="badge ${cls}" title="${a.rem} classes left this term">${a.allowed} of ${a.rem} left</span>`;
+  }
+  // Term calendar heatmap: one cell per weekday, coloured by the day's attendance outcome
+  function termCalendar(studentId, term) {
+    if (!term) return '';
+    const rows = q(`SELECT cs.session_date, cs.start_time, c.course_code || '-' || sec.section_code AS label, ar.status
+      FROM enrollments e JOIN class_sections sec ON sec.section_id = e.section_id AND sec.term_id = ?
+      JOIN courses c ON c.course_id = sec.course_id JOIN class_sessions cs ON cs.section_id = sec.section_id
+      LEFT JOIN attendance_records ar ON ar.session_id = cs.session_id AND ar.student_id = e.student_id
+      WHERE e.student_id = ? AND e.status = 'Active' ORDER BY cs.session_date, cs.start_time`, [term.term_id, studentId]);
+    const byDay = {};
+    rows.forEach((r) => (byDay[r.session_date] = byDay[r.session_date] || []).push(r));
+    const start = new Date(term.start_date + 'T00:00:00'); start.setDate(start.getDate() - ((start.getDay() + 6) % 7));
+    const end = new Date(term.end_date + 'T00:00:00');
+    const weekend = rows.some((r) => { const g = new Date(r.session_date + 'T00:00:00').getDay(); return g === 0 || g === 6; });
+    const nd = weekend ? 7 : 5;
+    const weeks = [];
+    for (const d = new Date(start); d <= end; d.setDate(d.getDate() + 7)) weeks.push(new Date(d));
+    const rank = ['Absent', 'Late', 'Excused', 'Present'];
+    const cell = (ymd) => {
+      const list = byDay[ymd];
+      const inTerm = ymd >= term.start_date && ymd <= term.end_date;
+      if (!list) return `<i class="cal-cell ${inTerm ? '' : 'out'}" title="${esc(fmtDate(ymd))}${inTerm ? ' · no class' : ''}"></i>`;
+      const recorded = list.filter((x) => x.status);
+      let cls;
+      if (ymd > TODAY) cls = 'future';
+      else if (!recorded.length) cls = 'pending';
+      else cls = rank.find((st) => recorded.some((x) => x.status === st));
+      const tip = `${fmtDate(ymd)}\n` + list.map((x) => `${x.label} ${x.start_time}: ${x.status || (ymd > TODAY ? 'upcoming' : 'not recorded')}`).join('\n');
+      return `<i class="cal-cell ${cls}${ymd === TODAY ? ' today' : ''}" title="${esc(tip)}"></i>`;
+    };
+    const dayLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].slice(0, nd);
+    let lastM = '';
+    const monthLabel = (w) => { const t = new Date(w); t.setDate(t.getDate() + 3); const m = t.toLocaleDateString('en-GB', { month: 'short' }); if (m === lastM) return ''; lastM = m; return esc(m); };
+    return `<div class="card"><div class="card-head"><div><h2>Term calendar</h2><p>${esc(term.term_name)} · each square is a day; hover for details</p></div>
+      <div class="legend" style="margin:0">${[['Present', 'Present'], ['Late', 'Late'], ['Absent', 'Absent'], ['Excused', 'Excused'], ['pending', 'Not recorded'], ['future', 'Upcoming']].map(([c, l]) => `<span><i class="cal-cell ${c} sw"></i>${l}</span>`).join('')}</div></div>
+      <div class="card-body cal-wrap"><div class="cal" style="--weeks:${weeks.length};--days:${nd}">
+        <div class="cal-days"><span></span>${dayLabels.map((d) => `<span>${d}</span>`).join('')}</div>
+        ${weeks.map((w) => `<div class="cal-week"><span class="cal-m">${monthLabel(w)}</span>${dayLabels.map((_, i) => { const d = new Date(w); d.setDate(d.getDate() + i); return cell(localYmd(d)); }).join('')}</div>`).join('')}
+      </div></div></div>`;
+  }
   function studentOverview(studentId, self) {
     const s = one(`SELECT s.*, p.program_name, u.username FROM students s JOIN programs p ON p.program_id = s.program_id LEFT JOIN users u ON u.user_id = s.user_id WHERE s.student_id = ?`, [studentId]);
     if (!s) return '<div class="card"><div class="empty">Student not found.</div></div>';
@@ -535,18 +611,22 @@
         <div class="card kpi"><div class="label">Attendance (${esc(term ? term.term_name : '')})</div><div class="value">${t.pct != null ? t.pct + '%' : '—'}</div><div class="delta">${num(t.total)} sessions recorded</div></div>
         ${STATUSES.map((st) => `<div class="card kpi"><div class="label"><span class="badge ${st}" style="height:18px"><span class="dot"></span>${st}</span></div><div class="value">${num(t[st])}</div><div class="delta">this term</div></div>`).join('')}
       </div>
-      <div class="grid two">
+      <div class="grid two cal-row">
+      ${termCalendar(studentId, term)}
+        <div class="card"><div class="card-head"><div><h2>Profile</h2></div></div><div class="card-body"><dl class="kv">
+          <dt>Student no.</dt><dd class="mono">${esc(s.student_no)}</dd><dt>Email</dt><dd>${esc(s.email)}</dd><dt>Phone</dt><dd>${esc(s.phone || '—')}</dd>
+          <dt>Program</dt><dd>${esc(s.program_name)}</dd><dt>Year level</dt><dd>${s.year_level}</dd><dt>Admitted</dt><dd>${esc(fmtDate(s.admitted_on))}</dd><dt>Login</dt><dd class="mono">${esc(s.username || 'No account')}</dd></dl></div></div>
+      </div>
+      <div class="spacer"></div>
         <div class="card"><div class="card-head"><div><h2>Enrolled classes</h2><p>Attendance per class section</p></div></div>
           ${table([
       { k: 'course_code', label: 'Class', fmt: (v, r) => `<strong>${esc(v)}-${esc(r.section_code)}</strong><span class="sub">${esc(r.course_title)} · ${esc(r.term_name)}</span>` },
       { k: 'instructor', label: 'Instructor / schedule', fmt: (v, r) => `${esc(v || '—')}<span class="sub">${esc(scheduleText(r.section_id))} · ${esc(r.room || '')}</span>` },
       { k: 'sessions_recorded', label: 'P / L / A / E', num: true, fmt: (v, r) => r.enr_status === 'Dropped' ? '<span class="badge off">Dropped</span>' : `<span class="tnum">${num(r.present_count)} / ${num(r.late_count)} / ${num(r.absent_count)} / ${num(r.excused_count)}</span>` },
       { k: 'attendance_pct', label: 'Attendance', num: true, fmt: pctCell },
-    ], enr, { empty: 'Not enrolled in any class sections.' })}</div>
-        <div class="card"><div class="card-head"><div><h2>Profile</h2></div></div><div class="card-body"><dl class="kv">
-          <dt>Student no.</dt><dd class="mono">${esc(s.student_no)}</dd><dt>Email</dt><dd>${esc(s.email)}</dd><dt>Phone</dt><dd>${esc(s.phone || '—')}</dd>
-          <dt>Program</dt><dd>${esc(s.program_name)}</dd><dt>Year level</dt><dd>${s.year_level}</dd><dt>Admitted</dt><dd>${esc(fmtDate(s.admitted_on))}</dd><dt>Login</dt><dd class="mono">${esc(s.username || 'No account')}</dd></dl></div></div>
-      </div>
+      { k: 'enrollment_id', label: 'Absences left', num: true, fmt: (v, r) => (r.enr_status === 'Active' && term && r.term_name === term.term_name && TODAY <= term.end_date ? allowanceCell(absenceAllowance(r, term.end_date)) : '<span class="faint">—</span>') },
+    ], enr, { empty: 'Not enrolled in any class sections.' })}
+          <div class="card-body" style="border-top:1px solid var(--border)"><p class="faint" style="font-size:var(--text-xs)">“Absences left” is how many more classes can be missed this term while still finishing at or above the ${threshold()}% threshold, assuming every other remaining class is attended.</p></div></div>
       <div class="spacer"></div>
       <div class="card"><div class="card-head"><div><h2>${self ? 'Recent attendance' : 'Attendance history'}</h2><p>${self ? 'Latest 12 sessions' : 'Latest 40 sessions'}</p></div>${self ? '<a class="btn sm" href="#/history">Full history</a>' : ''}</div>
         ${historyTable(recent)}</div>`;
@@ -961,7 +1041,7 @@
         <div class="seg-ctl" role="tablist">${[['recent', 'Recent'], ['pending', 'Needs attendance'], ['upcoming', 'Upcoming'], ['all', 'All']].map(([k, l]) => `<button type="button" class="${when === k ? 'on Present' : ''}" data-action="att-when" data-v="${k}">${l}</button>`).join('')}</div>
         <span class="muted" style="font-size:var(--text-sm)">${rows.length} sessions</span></div>
       ${todays.length ? `<div class="card" style="margin-bottom:16px;border-color:rgba(95,212,166,.35)"><div class="card-head"><div><h2>Today</h2><p>${esc(fmtDate(TODAY))}</p></div></div><div class="session-list">${todays.map(sessionItem).join('')}</div></div>` : ''}
-      <div class="card">${rest.length ? `<div class="session-list">${rest.map(sessionItem).join('')}</div>` : '<div class="empty">No sessions match these filters.</div>'}</div>`;
+      ${rest.length ? `<div class="card"><div class="session-list">${rest.map(sessionItem).join('')}</div></div>` : todays.length ? '' : `<div class="card"><div class="empty">${when === 'pending' ? 'All caught up — every held session has attendance recorded.' : 'No sessions match these filters.'}</div></div>`}`;
   };
   AFTER.attendance = () => bindChange('att-section', (v) => { state.attSection = v; render(); });
   ACTIONS['att-when'] = (el) => { state.attWhen = el.dataset.v; render(); };
@@ -1043,8 +1123,10 @@
       <div class="grid two">
         <div class="card">
           <div class="card-head"><div><h2>Roster</h2><p>${roster.length} enrolled students</p></div>
-            ${future ? '' : `<div class="actions"><button class="btn sm" data-action="mark-all" data-v="Present">Mark all present</button><button class="btn sm ghost" data-action="mark-all" data-v="">Clear</button></div>`}</div>
-          <div class="roster">${roster.map((r) => `<div class="roster-row" data-sid="${r.student_id}">
+            ${future ? '' : `<div class="actions"><button class="btn sm" data-action="mark-all" data-v="Present" title="Marks every unmarked student Present">Unmarked → Present</button><button class="btn sm" data-action="mark-all" data-v="Absent" title="Marks every unmarked student Absent">Unmarked → Absent</button><button class="btn sm ghost" data-action="mark-all" data-v="">Clear</button></div>`}</div>
+          ${roster.length > 1 ? `<div class="roster-tools"><div class="search">${ICON.search}<input class="input" id="roster-q" placeholder="Find a student by name or number" aria-label="Filter roster"></div>
+            ${future ? '' : '<span class="faint kbd-hint">Keyboard: select a row, then <kbd>P</kbd> <kbd>L</kbd> <kbd>A</kbd> <kbd>E</kbd> · <kbd>↑</kbd> <kbd>↓</kbd> to move</span>'}</div>` : ''}
+          <div class="roster">${roster.map((r) => `<div class="roster-row" data-sid="${r.student_id}" data-q="${esc((r.name + ' ' + r.student_no).toLowerCase())}" tabindex="${future ? -1 : 0}" aria-label="${esc(r.name)}">
               <span class="avatar">${esc(initials(r.name))}</span>
               <div><div style="font-weight:600">${esc(r.name)}</div><div class="muted mono" style="font-size:var(--text-xs)">${esc(r.student_no)}</div></div>
               <div class="seg-ctl">${STATUSES.map((st) => `<button type="button" class="${st} ${r.status === st ? 'on' : ''}" data-action="mark" data-sid="${r.student_id}" data-v="${st}" ${dis}>${st}</button>`).join('')}</div>
@@ -1072,12 +1154,18 @@
     if (box) box.innerHTML = `<div class="kpi" style="padding:0 0 12px"><div class="label">Attendance rate</div><div class="value">${pct}</div><div class="delta">${t.total} of ${ids.length} marked</div></div>${stackBar(t)}`;
   }
   AFTER.session = () => {
-    $$('[data-f]').forEach((el) => el.addEventListener('input', () => { const m = MARKS[el.dataset.sid]; if (m) m[el.dataset.f] = el.value; }));
+    $$('[data-f]').forEach((el) => el.addEventListener('input', () => { const m = MARKS[el.dataset.sid]; if (m) { m[el.dataset.f] = el.value; DIRTY = true; } }));
+    const rq = $('#roster-q');
+    if (rq) rq.addEventListener('input', () => {
+      const t = rq.value.trim().toLowerCase();
+      $$('.roster-row').forEach((row) => { row.hidden = !!t && !row.dataset.q.includes(t); });
+    });
     updateMarkSummary();
   };
   function setMark(sid, v) {
     const m = MARKS[sid]; if (!m) return;
     const s = MARKS._session;
+    if (m.status !== v) DIRTY = true;
     m.status = v;
     if (v === 'Present' || v === 'Late') { if (!m.check) m.check = s.session_date === TODAY && v === 'Late' ? nowHm() : s.start_time; }
     else m.check = '';
@@ -1088,6 +1176,22 @@
     }
   }
   ACTIONS.mark = (el) => { setMark(el.dataset.sid, el.dataset.v); updateMarkSummary(); };
+  // Keyboard marking on the session page: P / L / A / E set status, arrows (or J / K) move between students
+  document.addEventListener('keydown', (e) => {
+    if (parseHash().route !== 'session' || e.ctrlKey || e.metaKey || e.altKey) return;
+    const row = document.activeElement && document.activeElement.closest && document.activeElement.closest('.roster-row');
+    if (!row || /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName)) return;
+    const rows = $$('.roster-row').filter((r) => !r.hidden);
+    const i = rows.indexOf(row);
+    const move = (d) => { const n = rows[i + d]; if (n) n.focus(); };
+    const k = e.key.toLowerCase();
+    const map = { p: 'Present', l: 'Late', a: 'Absent', e: 'Excused' };
+    if (map[k]) {
+      if ($('.seg-ctl button', row).disabled) return;
+      e.preventDefault(); setMark(row.dataset.sid, map[k]); updateMarkSummary(); move(1);
+    } else if (k === 'arrowdown' || k === 'j') { e.preventDefault(); move(1); }
+    else if (k === 'arrowup' || k === 'k') { e.preventDefault(); move(-1); }
+  });
   ACTIONS['mark-all'] = (el) => { Object.keys(MARKS).filter((k) => k !== '_session').forEach((k) => { if (!el.dataset.v || !MARKS[k].status) setMark(k, el.dataset.v); }); updateMarkSummary(); };
   ACTIONS['save-attendance'] = () => {
     const s = MARKS._session;
@@ -1110,6 +1214,7 @@
         }
       }
     });
+    DIRTY = false;
     toast(`Attendance saved for ${saved} student${saved === 1 ? '' : 's'}${removed ? `, ${removed} cleared` : ''}.`);
     render();
   };
@@ -1119,7 +1224,7 @@
   });
 
   // ---------------------------------------------------------------- Reports
-  const REPORT_TABS = [['history', 'Student history'], ['class', 'Class summary'], ['daily', 'Daily report'], ['course', 'Course statistics'], ['pct', 'Attendance %'], ['absence', 'Absence & lateness'], ['threshold', 'Below threshold']];
+  const REPORT_TABS = [['history', 'Student history'], ['class', 'Class summary'], ['daily', 'Daily report'], ['course', 'Course statistics'], ['pct', 'Attendance %'], ['absence', 'Absence & lateness'], ['threshold', 'Below threshold'], ['register', 'Attendance register']];
   const statusCols = [
     { k: 'present_count', label: 'Present', num: true }, { k: 'late_count', label: 'Late', num: true },
     { k: 'absent_count', label: 'Absent', num: true }, { k: 'excused_count', label: 'Excused', num: true },
@@ -1277,8 +1382,57 @@ ORDER BY v.attendance_pct ASC;`;
       name = `below-threshold-${T}.csv`;
     }
 
+
+    if (tab === 'register') {
+      const secs = sectionOptions('', state.rep.section);
+      const sec = Number(state.rep.section || (secs.rows[0] || {}).section_id || 0);
+      state.rep.section = sec;
+      filters = `<select class="input" data-action-change="rep-section" aria-label="Section">${sectionOptions('', sec).html}</select>`;
+      sql = `SELECT s.student_id, s.student_no, s.first_name || ' ' || s.last_name AS student_name,
+       cs.session_id, cs.session_date, ar.status
+FROM enrollments e
+JOIN students s        ON s.student_id  = e.student_id
+JOIN class_sessions cs ON cs.section_id = e.section_id
+LEFT JOIN attendance_records ar
+       ON ar.session_id = cs.session_id AND ar.student_id = s.student_id
+WHERE e.section_id = ${sec} AND e.status = 'Active' AND cs.session_date <= '${TODAY}'
+ORDER BY s.last_name, s.first_name, cs.session_date, cs.start_time;`;
+      const flat = canManageSection(sec) ? q(sql) : [];
+      const sessions = [], seen = {}, studs = [], byStud = {};
+      flat.forEach((r) => {
+        if (!seen[r.session_id]) { seen[r.session_id] = 1; sessions.push({ id: r.session_id, date: r.session_date }); }
+        if (!byStud[r.student_id]) { byStud[r.student_id] = { id: r.student_id, no: r.student_no, name: r.student_name, m: {} }; studs.push(byStud[r.student_id]); }
+        byStud[r.student_id].m[r.session_id] = r.status;
+      });
+      sessions.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : a.id - b.id));
+      const L = { Present: 'P', Late: 'L', Absent: 'A', Excused: 'E' };
+      studs.forEach((st) => {
+        const vals = Object.values(st.m).filter(Boolean);
+        const c = (x) => vals.filter((v) => v === x).length;
+        st.P = c('Present'); st.L = c('Late'); st.A = c('Absent'); st.E = c('Excused');
+        const den = vals.length - st.E;
+        st.pct = den > 0 ? Math.round((1000 * (st.P + st.L)) / den) / 10 : null;
+      });
+      const thr = threshold();
+      const exportRows = studs.map((st) => {
+        const o = { student_no: st.no, student_name: st.name };
+        sessions.forEach((x, i) => (o[`${x.date} #${i + 1}`] = L[st.m[x.id]] || ''));
+        Object.assign(o, { present: st.P, late: st.L, absent: st.A, excused: st.E, attendance_pct: st.pct });
+        return o;
+      });
+      state.lastExport = { name: `attendance-register-${sec}.csv`, rows: exportRows };
+      const colTot = (id) => { let a = 0, d = 0; studs.forEach((st) => { const v = st.m[id]; if (v && v !== 'Excused') { d++; if (v !== 'Absent') a++; } }); return d ? Math.round((100 * a) / d) + '%' : '—'; };
+      const grid = !studs.length ? `<div class="empty">No sessions held yet for this section.</div>` :
+        `<div class="table-wrap register-wrap"><table class="register"><thead><tr><th class="stick">Student</th>${sessions.map((x) => `<th class="rc"><a href="#/session/${x.id}" title="${esc(fmtDate(x.date))}"><span>${esc(fmtDate(x.date, { day: 'numeric' }))}</span><span class="faint">${esc(fmtDate(x.date, { month: 'short' }))}</span></a></th>`).join('')}<th class="num">P</th><th class="num">L</th><th class="num">A</th><th class="num">E</th><th class="num">%</th></tr></thead>
+          <tbody>${studs.map((st) => `<tr><td class="stick"><a href="#/student/${st.id}">${esc(st.name)}</a><span class="sub mono">${esc(st.no)}</span></td>${sessions.map((x) => { const v = st.m[x.id]; return `<td class="rc"><span class="rl ${v || 'none'}" title="${esc(v || 'Not recorded')}">${v ? L[v] : '·'}</span></td>`; }).join('')}<td class="num">${st.P}</td><td class="num">${st.L}</td><td class="num">${st.A}</td><td class="num">${st.E}</td><td class="num">${pctCell(st.pct)}</td></tr>`).join('')}</tbody>
+          <tfoot><tr><td class="stick muted">Session attendance</td>${sessions.map((x) => `<td class="rc faint">${colTot(x.id)}</td>`).join('')}<td colspan="5"></td></tr></tfoot></table></div>`;
+      return `<div class="toolbar">${filters}<span class="muted" style="font-size:var(--text-sm)">${studs.length} students × ${sessions.length} sessions</span><span style="flex:1"></span><button class="btn sm" data-action="print">Print</button><button class="btn sm" data-action="export-csv">${ICON.dl}Export CSV</button></div>
+        <div class="legend" style="margin:0 0 12px">${['Present', 'Late', 'Absent', 'Excused'].map((x) => `<span><span class="rl ${x}">${L[x]}</span>${x}</span>`).join('')}<span><span class="rl none">·</span>Not recorded</span><span class="faint">Threshold ${thr}% · click a date to open the session</span></div>
+        <div class="card">${grid}</div>${sqlBlock(sql)}`;
+    }
+
     state.lastExport = { name, rows: rows.map((r) => { const o = { ...r }; delete o.student_id; return o; }) };
-    return `<div class="toolbar">${filters}<span class="muted" style="font-size:var(--text-sm)">${rows.length} rows</span><span style="flex:1"></span><button class="btn sm" data-action="export-csv">${ICON.dl}Export CSV</button></div>
+    return `<div class="toolbar">${filters}<span class="muted" style="font-size:var(--text-sm)">${rows.length} rows</span><span style="flex:1"></span><button class="btn sm" data-action="print">Print</button><button class="btn sm" data-action="export-csv">${ICON.dl}Export CSV</button></div>
       ${extra}<div class="card">${table(cols, rows, { href, empty: 'No data for this selection.' })}</div>${sqlBlock(sql)}`;
   }
   PAGES.reports = () => {
@@ -1294,6 +1448,7 @@ ORDER BY v.attendance_pct ASC;`;
     bindChange('rep-term', (v) => { state.rep.term = v; render(); });
   };
   ACTIONS['rep-tab'] = (el) => { state.reportTab = el.dataset.v; render(); };
+  ACTIONS.print = () => window.print();
   ACTIONS['save-threshold'] = () => {
     const v = Number($('#thr').value);
     if (!(v >= 1 && v <= 100)) throw new Error('Threshold must be between 1 and 100.');
@@ -1322,6 +1477,63 @@ ORDER BY v.attendance_pct ASC;`;
       ${group('view', 'Views', 'Reusable reporting queries')}
       ${group('trigger', 'Triggers', 'Business rules enforced inside the database')}
       ${group('index', 'Indexes', 'Speed up the most common lookups and joins')}`;
+  };
+
+
+  // ---------------------------------------------------------------- Audit log (admin)
+  PAGES.audit = () => {
+    const secs = sectionOptions('', state.auditSection);
+    const users = q(`SELECT DISTINCT u.user_id, u.username, u.role FROM attendance_audit a JOIN users u ON u.user_id = a.changed_by ORDER BY u.username`);
+    const where = [];
+    if (state.auditSection) where.push(`cs.section_id = ${Number(state.auditSection)}`);
+    if (state.auditUser) where.push(`a.changed_by = ${Number(state.auditUser)}`);
+    if (state.auditKind) where.push(`a.new_status = '${state.auditKind.replace(/[^A-Za-z]/g, '')}'`);
+    const sql = `SELECT a.audit_id, a.changed_at, u.username, u.role,
+       s.student_id, s.first_name || ' ' || s.last_name AS student_name, s.student_no,
+       cs.session_id, cs.session_date, c.course_code || '-' || sec.section_code AS section,
+       a.old_status, a.new_status
+FROM attendance_audit a
+LEFT JOIN attendance_records ar ON ar.attendance_id = a.attendance_id
+LEFT JOIN students s            ON s.student_id     = ar.student_id
+LEFT JOIN class_sessions cs     ON cs.session_id    = ar.session_id
+LEFT JOIN class_sections sec    ON sec.section_id   = cs.section_id
+LEFT JOIN courses c             ON c.course_id      = sec.course_id
+LEFT JOIN users u               ON u.user_id        = a.changed_by
+${where.length ? 'WHERE ' + where.join(' AND ') + '\n' : ''}ORDER BY a.changed_at DESC, a.audit_id DESC
+LIMIT 300;`;
+    const rows = q(sql);
+    const total = val(`SELECT COUNT(*) FROM attendance_audit`);
+    const edits = val(`SELECT COUNT(DISTINCT attendance_id) FROM attendance_audit`);
+    const logins = q(`SELECT username, role, last_login_at FROM users WHERE last_login_at IS NOT NULL ORDER BY last_login_at DESC LIMIT 8`);
+    state.lastExport = { name: 'attendance-audit.csv', rows: rows.map((r) => ({ changed_at: r.changed_at, changed_by: r.username, student_no: r.student_no, student: r.student_name, section: r.section, session_date: r.session_date, old_status: r.old_status, new_status: r.new_status })) };
+    return `<div class="page-head"><div><h1>Audit log</h1><p>Whenever an existing attendance status is changed, the <span class="mono">trg_attendance_audit</span> trigger writes the old and new value to <span class="mono">attendance_audit</span> — who changed what, and when.</p></div></div>
+      <div class="grid kpis" style="grid-template-columns:repeat(3,minmax(0,1fr))">
+        <div class="card kpi"><div class="label">Status changes</div><div class="value">${total}</div><div class="delta">logged by the audit trigger</div></div>
+        <div class="card kpi"><div class="label">Records affected</div><div class="value">${edits}</div><div class="delta">distinct attendance records edited</div></div>
+        <div class="card kpi"><div class="label">Editors</div><div class="value">${users.length}</div><div class="delta">distinct users making changes</div></div>
+      </div>
+      <div class="grid two" style="margin-top:16px">
+        <div><div class="toolbar">
+          <select class="input" data-action-change="audit-section" aria-label="Section"><option value="">All sections</option>${secs.html}</select>
+          <select class="input" data-action-change="audit-user" aria-label="Changed by"><option value="">Anyone</option>${users.map((u) => opt(u.user_id, `${u.username} (${u.role})`, state.auditUser)).join('')}</select>
+          <select class="input" data-action-change="audit-kind" aria-label="New status"><option value="">Any new status</option>${STATUSES.map((x) => opt(x, 'Changed to ' + x, state.auditKind)).join('')}</select>
+          <span style="flex:1"></span><button class="btn sm" data-action="export-csv">${ICON.dl}Export CSV</button></div>
+        <div class="card">${table([
+          { k: 'changed_at', label: 'When', fmt: (v) => `<span class="nowrap">${esc(fmtDT(v))}</span>` },
+          { k: 'username', label: 'By', fmt: (v, r) => `${esc(v || 'system')}<span class="sub">${esc(r.role || '')}</span>` },
+          { k: 'student_name', label: 'Student', fmt: (v, r) => (v ? `<a href="#/student/${r.student_id}">${esc(v)}</a><span class="sub mono">${esc(r.student_no)}</span>` : '<span class="faint">record removed</span>') },
+          { k: 'section', label: 'Session', fmt: (v, r) => (v ? `<a href="#/session/${r.session_id}">${esc(v)}</a><span class="sub">${esc(fmtDate(r.session_date))}</span>` : '—') },
+          { k: 'new_status', label: 'Change', fmt: (v, r) => `<span class="nowrap">${r.old_status ? badge(r.old_status) + ' <span class="faint">→</span> ' : ''}${badge(v)}</span>` },
+        ], rows, { empty: 'No audit entries match these filters.' })}</div>
+        ${rows.length === 300 ? '<p class="faint" style="font-size:var(--text-xs);margin-top:8px">Showing the latest 300 entries.</p>' : ''}${sqlBlock(sql)}</div>
+        <div class="card" style="align-self:start"><div class="card-head"><div><h2>Recent sign-ins</h2><p>From <span class="mono">users.last_login_at</span></p></div></div>
+          ${table([{ k: 'username', label: 'User', fmt: (v, r) => `${esc(v)}<span class="sub">${esc(r.role)}</span>` }, { k: 'last_login_at', label: 'Last sign-in', fmt: (v) => esc(fmtDT(v)) }], logins, { empty: 'No sign-ins yet.' })}</div>
+      </div>`;
+  };
+  AFTER.audit = () => {
+    bindChange('audit-section', (v) => { state.auditSection = v; render(); });
+    bindChange('audit-user', (v) => { state.auditUser = v; render(); });
+    bindChange('audit-kind', (v) => { state.auditKind = v; render(); });
   };
 
   // ---------------------------------------------------------------- SQL console
